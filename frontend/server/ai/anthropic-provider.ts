@@ -1,9 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import {
   ClassificationSchema,
-  ExtractionResultSchema,
-  ImageDescriptionSchema,
   type Classification,
   type ExtractionResult,
   type ImageDescription,
@@ -11,9 +8,13 @@ import {
 import {
   SYSTEM_PROMPT,
   IMAGE_SYSTEM_PROMPT,
+  CLASSIFICATION_JSON_SHAPE,
+  EXTRACTION_JSON_SHAPE,
   classificationUserPrompt,
   extractionUserPrompt,
 } from "@/server/ai/prompts.ts";
+import { extractJson } from "@/server/ai/json.ts";
+import { parseExtraction } from "@/server/ai/parse.ts";
 import type {
   AiProvider,
   ClassifyInput,
@@ -24,9 +25,11 @@ import { AiProviderError } from "@/server/lib/errors.ts";
 import { logger } from "@/server/lib/logger.ts";
 
 /**
- * Claude-backed extractor. Uses structured outputs (output_config.format) so
- * responses are schema-constrained, then validates again with Zod. Model output
- * is never trusted directly.
+ * Claude-backed extractor. Requests JSON by prompt and validates every response
+ * with Zod. We intentionally use the plain Messages API (not the strict
+ * structured-output format), because our extraction schema is rich enough that
+ * the strict JSON-schema conversion is rejected by some models with a 400.
+ * Model output is never trusted directly.
  */
 export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
@@ -40,21 +43,31 @@ export class AnthropicProvider implements AiProvider {
     this.visionEnabled = opts.visionEnabled;
   }
 
+  private async message(system: string, content: Anthropic.MessageParam["content"], maxTokens: number): Promise<string> {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content }],
+    });
+    if (response.stop_reason === "refusal") {
+      throw new AiProviderError("The AI declined to process this message.");
+    }
+    const block = response.content.find((b) => b.type === "text");
+    if (!block || block.type !== "text" || !block.text) {
+      throw new AiProviderError("AI returned an empty response.");
+    }
+    return block.text;
+  }
+
   async classify(input: ClassifyInput): Promise<Classification> {
     try {
-      const response = await this.client.messages.parse({
-        model: this.model,
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        output_config: { format: zodOutputFormat(ClassificationSchema) },
-        messages: [{ role: "user", content: classificationUserPrompt(input.text) }],
-      });
-      if (response.stop_reason === "refusal") {
-        throw new AiProviderError("The AI declined to process this message.");
-      }
-      const parsed = response.parsed_output;
-      if (!parsed) throw new AiProviderError("AI returned no parseable classification.");
-      return parsed;
+      const text = await this.message(
+        SYSTEM_PROMPT,
+        `${classificationUserPrompt(input.text)}\n\n${CLASSIFICATION_JSON_SHAPE}`,
+        1024,
+      );
+      return ClassificationSchema.parse(extractJson(text));
     } catch (err) {
       throw wrap(err, "classification");
     }
@@ -62,19 +75,12 @@ export class AnthropicProvider implements AiProvider {
 
   async extract(input: ExtractInput): Promise<ExtractionResult> {
     try {
-      const response = await this.client.messages.parse({
-        model: this.model,
-        max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        output_config: { format: zodOutputFormat(ExtractionResultSchema) },
-        messages: [{ role: "user", content: extractionUserPrompt(input.text, input.hint) }],
-      });
-      if (response.stop_reason === "refusal") {
-        throw new AiProviderError("The AI declined to process this message.");
-      }
-      const parsed = response.parsed_output;
-      if (!parsed) throw new AiProviderError("AI returned no parseable extraction.");
-      return parsed;
+      const text = await this.message(
+        SYSTEM_PROMPT,
+        `${extractionUserPrompt(input.text, input.hint)}\n\n${EXTRACTION_JSON_SHAPE}`,
+        8000,
+      );
+      return parseExtraction(extractJson(text));
     } catch (err) {
       throw wrap(err, "extraction");
     }
@@ -85,29 +91,26 @@ export class AnthropicProvider implements AiProvider {
       return { description: "", visible_features: [] };
     }
     try {
-      const response = await this.client.messages.parse({
-        model: this.model,
-        max_tokens: 1024,
-        system: IMAGE_SYSTEM_PROMPT,
-        output_config: { format: zodOutputFormat(ImageDescriptionSchema) },
-        messages: [
+      const text = await this.message(
+        IMAGE_SYSTEM_PROMPT,
+        [
           {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: input.mimeType as "image/jpeg" | "image/png",
-                  data: input.base64,
-                },
-              },
-              { type: "text", text: "Describe this property photo for an agent." },
-            ],
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: input.mimeType as "image/jpeg" | "image/png",
+              data: input.base64,
+            },
+          },
+          {
+            type: "text",
+            text: 'Describe this property photo for an agent. Respond ONLY with JSON: {"description": string, "visible_features": [string]}',
           },
         ],
-      });
-      return response.parsed_output ?? { description: "", visible_features: [] };
+        1024,
+      );
+      const parsed = extractJson(text) as ImageDescription;
+      return { description: parsed.description ?? "", visible_features: parsed.visible_features ?? [] };
     } catch (err) {
       logger.warn("image description failed", { message: err instanceof Error ? err.message : String(err) });
       return { description: "", visible_features: [] };

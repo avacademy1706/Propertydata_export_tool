@@ -1,6 +1,5 @@
 import {
   ClassificationSchema,
-  ExtractionResultSchema,
   type Classification,
   type ExtractionResult,
 } from "@/server/ai/schemas.ts";
@@ -12,6 +11,8 @@ import {
   extractionUserPrompt,
 } from "@/server/ai/prompts.ts";
 import type { AiProvider, ClassifyInput, ExtractInput } from "@/server/ai/provider.ts";
+import { extractJson } from "@/server/ai/json.ts";
+import { parseExtraction } from "@/server/ai/parse.ts";
 import { AiProviderError } from "@/server/lib/errors.ts";
 
 /**
@@ -71,24 +72,7 @@ export class OpenAICompatibleProvider implements AiProvider {
 
   async extract(input: ExtractInput): Promise<ExtractionResult> {
     const raw = await this.chat(SYSTEM_PROMPT, `${extractionUserPrompt(input.text, input.hint)}\n\n${EXTRACTION_JSON_SHAPE}`);
-    return ExtractionResultSchema.parse(extractJson(raw));
-  }
-}
-
-/** Tolerant JSON extraction: strips markdown fences and finds the JSON object. */
-function extractJson(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : trimmed;
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(candidate.slice(start, end + 1));
-    }
-    throw new AiProviderError("AI provider returned invalid JSON.");
+    return parseExtraction(extractJson(raw));
   }
 }
 

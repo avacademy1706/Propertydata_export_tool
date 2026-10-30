@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Search, Columns3, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown,
-  MoreVertical, MessageCircle, Newspaper, Link2 as RefIcon, User as ManualIcon, Image as ImageIcon, Check, Settings,
+  MoreVertical, MessageCircle, Newspaper, Link2 as RefIcon, User as ManualIcon, Image as ImageIcon, Check, Plus, X, Trash2,
 } from "lucide-react";
 import { api } from "@/app/lib/api.ts";
-import { Badge, prettyEnum, useDebounced, useToast, verificationTone } from "@/app/components/ui.tsx";
+import { Badge, Spinner, prettyEnum, useDebounced, useToast, verificationTone } from "@/app/components/ui.tsx";
 import type { BuyerDTO, MatchDTO, SellerDTO } from "@/app/lib/types.ts";
 
 const PAGE_SIZE = 8;
@@ -141,14 +141,6 @@ function Toolbar({ search, setSearch, children }: { search: string; setSearch: (
   );
 }
 
-function SettingsButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} aria-label="Field settings" title="Field settings" className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium" style={{ background: "var(--surface)", borderColor: "var(--border-strong)", color: "var(--muted)" }}>
-      <Settings size={15} aria-hidden="true" />
-      <span className="hidden sm:inline">Settings</span>
-    </button>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Column registries (every parameter is a toggleable column)
@@ -160,6 +152,8 @@ interface ColumnDef {
   sortField?: string;
   default: boolean;
   render: (row: AnyRow) => React.ReactNode;
+  custom?: boolean; // admin-added custom field (removable)
+  fieldId?: string; // definition id, for removal
 }
 
 const joinList = (v: string[] | undefined) => (v && v.length ? v.join(", ") : "—");
@@ -245,9 +239,9 @@ function loadVisible(kind: "buyer" | "seller", columns: ColumnDef[]): string[] {
   try {
     const raw = localStorage.getItem(`pd:cols:${kind}`);
     if (raw) {
-      const arr = JSON.parse(raw) as string[];
-      const valid = arr.filter((k) => columns.some((c) => c.key === k));
-      if (valid.length) return valid;
+      const arr = JSON.parse(raw) as unknown;
+      // Keep every saved key (including custom "cf:*" ones that load asynchronously).
+      if (Array.isArray(arr) && arr.length && arr.every((x) => typeof x === "string")) return arr as string[];
     }
   } catch {
     /* ignore */
@@ -255,10 +249,13 @@ function loadVisible(kind: "buyer" | "seller", columns: ColumnDef[]): string[] {
   return fallback;
 }
 
-function ColumnsPopover({ columns, visible, onToggle, onReset }: {
-  columns: ColumnDef[]; visible: string[]; onToggle: (key: string) => void; onReset: () => void;
+function ColumnsPopover({ columns, visible, onToggle, onReset, onCreateField, onRemoveField }: {
+  columns: ColumnDef[]; visible: string[]; onToggle: (key: string) => void; onReset: () => void; onCreateField: (label: string) => Promise<void>; onRemoveField: (col: ColumnDef) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -266,6 +263,20 @@ function ColumnsPopover({ columns, visible, onToggle, onReset }: {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
+
+  async function submit() {
+    const name = label.trim();
+    if (!name || saving) return;
+    setSaving(true);
+    try {
+      await onCreateField(name);
+      setLabel("");
+      setAdding(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div ref={ref} className="relative">
       <button onClick={() => setOpen((o) => !o)} aria-haspopup="true" aria-expanded={open} className="inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium" style={{ background: "var(--surface)", borderColor: "var(--border-strong)" }}>
@@ -277,22 +288,60 @@ function ColumnsPopover({ columns, visible, onToggle, onReset }: {
             <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>Show columns</span>
             <button onClick={onReset} className="text-xs underline" style={{ color: "var(--accent)" }}>Reset</button>
           </div>
+          {adding ? (
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-2" style={{ borderColor: "var(--border)" }}>
+              <input
+                autoFocus
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void submit(); if (e.key === "Escape") { setAdding(false); setLabel(""); } }}
+                placeholder="New field name"
+                aria-label="New field name"
+                className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-sm outline-none"
+                style={{ background: "var(--surface-muted)", borderColor: "var(--border-strong)", color: "var(--foreground)" }}
+              />
+              <button onClick={() => void submit()} disabled={saving || !label.trim()} aria-label="Save field" className="flex h-8 w-8 items-center justify-center rounded-md text-white disabled:opacity-50" style={{ background: "var(--accent)" }}>
+                {saving ? <Spinner /> : <Check size={15} aria-hidden="true" />}
+              </button>
+              <button onClick={() => { setAdding(false); setLabel(""); }} aria-label="Cancel" className="flex h-8 w-8 items-center justify-center rounded-md" style={{ color: "var(--muted)" }}>
+                <X size={15} aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setAdding(true)} className="flex w-full items-center gap-2 border-b px-3 py-2.5 text-left text-sm font-medium hover:bg-[var(--surface-muted)]" style={{ borderColor: "var(--border)", color: "var(--accent)" }}>
+              <span className="flex h-5 w-5 items-center justify-center rounded-md" style={{ background: "var(--accent-soft)" }}><Plus size={14} aria-hidden="true" /></span>
+              Add field
+            </button>
+          )}
           <div className="scroll-area max-h-72 overflow-y-auto p-1.5">
             {columns.map((c) => {
               const checked = visible.includes(c.key);
               return (
-                <button
-                  key={c.key}
-                  role="menuitemcheckbox"
-                  aria-checked={checked}
-                  onClick={() => onToggle(c.key)}
-                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm hover:bg-[var(--surface-muted)]"
-                >
-                  <span className="flex h-4 w-4 items-center justify-center rounded border" style={{ background: checked ? "var(--accent)" : "transparent", borderColor: checked ? "var(--accent)" : "var(--border-strong)" }}>
-                    {checked && <Check size={12} color="#fff" aria-hidden="true" />}
-                  </span>
-                  {c.label}
-                </button>
+                <div key={c.key} className="group flex items-center rounded-md hover:bg-[var(--surface-muted)]">
+                  <button
+                    role="menuitemcheckbox"
+                    aria-checked={checked}
+                    onClick={() => onToggle(c.key)}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left text-sm"
+                  >
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded border" style={{ background: checked ? "var(--accent)" : "transparent", borderColor: checked ? "var(--accent)" : "var(--border-strong)" }}>
+                      {checked && <Check size={12} color="#fff" aria-hidden="true" />}
+                    </span>
+                    <span className="truncate">{c.label}</span>
+                    {c.custom && <Badge tone="neutral">custom</Badge>}
+                  </button>
+                  {c.custom && (
+                    <button
+                      onClick={() => onRemoveField(c)}
+                      aria-label={`Remove ${c.label}`}
+                      title="Remove field"
+                      className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md opacity-60 hover:opacity-100"
+                      style={{ color: "var(--danger)" }}
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -306,10 +355,10 @@ function ColumnsPopover({ columns, visible, onToggle, onReset }: {
 // Records table (buyers / sellers) with dynamic columns
 // ---------------------------------------------------------------------------
 
-export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since, onSettings }: {
-  kind: "buyer" | "seller"; refreshKey: number; onOpen: (id: string) => void; onChanged: () => void; since?: string; onSettings: () => void;
+export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since }: {
+  kind: "buyer" | "seller"; refreshKey: number; onOpen: (id: string) => void; onChanged: () => void; since?: string;
 }) {
-  const columns = kind === "buyer" ? buyerColumns : sellerColumns;
+  const baseColumns = kind === "buyer" ? buyerColumns : sellerColumns;
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
@@ -317,26 +366,90 @@ export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since, onSet
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [visible, setVisible] = useState<string[]>(() => columns.filter((c) => c.default).map((c) => c.key));
+  const [visible, setVisible] = useState<string[]>(() => baseColumns.filter((c) => c.default).map((c) => c.key));
+  const [customCols, setCustomCols] = useState<ColumnDef[]>([]);
+  const [fieldsReload, setFieldsReload] = useState(0);
   const debounced = useDebounced(search);
   const toast = useToast();
 
+  const columns = [...baseColumns, ...customCols];
+
   // Load saved column choice on mount (client only).
   useEffect(() => {
-    const applySaved = () => setVisible(loadVisible(kind, columns));
+    const applySaved = () => setVisible(loadVisible(kind, baseColumns));
     applySaved();
-  }, [kind, columns]);
+  }, [kind, baseColumns]);
+
+  // Load admin-defined custom fields and render them as toggleable columns.
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const res = await api.listFields(kind === "buyer" ? "BUYER" : "SELLER");
+        if (!active) return;
+        const defs: ColumnDef[] = res.fields
+          .filter((f) => !f.isCore && f.isActive)
+          .map((f) => ({
+            key: `cf:${f.fieldKey}`,
+            label: f.label,
+            default: false,
+            custom: true,
+            fieldId: f.id,
+            render: (r: AnyRow) => {
+              const v = (r.customFields as Record<string, unknown> | undefined)?.[f.fieldKey];
+              return v === null || v === undefined || v === "" ? "—" : String(v);
+            },
+          }));
+        setCustomCols(defs);
+      } catch {
+        /* ignore */
+      }
+    };
+    void run();
+    return () => { active = false; };
+  }, [kind, fieldsReload]);
 
   function persist(next: string[]) {
     setVisible(next);
     try { localStorage.setItem(`pd:cols:${kind}`, JSON.stringify(next)); } catch { /* ignore */ }
   }
   function toggleColumn(key: string) {
-    persist(visible.includes(key) ? visible.filter((k) => k !== key) : [...columns.filter((c) => visible.includes(c.key) || c.key === key).map((c) => c.key)]);
+    persist(visible.includes(key) ? visible.filter((k) => k !== key) : columns.filter((c) => visible.includes(c.key) || c.key === key).map((c) => c.key));
   }
   function resetColumns() {
-    const def = columns.filter((c) => c.default).map((c) => c.key);
-    persist(def);
+    persist(baseColumns.filter((c) => c.default).map((c) => c.key));
+  }
+
+  async function createField(label: string) {
+    try {
+      const res = await api.createField({
+        label,
+        dataType: "TEXT",
+        entityTypes: kind === "buyer" ? "BUYER" : "SELLER",
+        showInTable: true,
+        isSearchable: true,
+        includeInExport: true,
+      });
+      const key = `cf:${res.field.fieldKey}`;
+      setFieldsReload((x) => x + 1);
+      persist([...visible, key]);
+      toast("success", `Field "${label}" added.`);
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "Could not add field.");
+    }
+  }
+
+  async function removeField(col: ColumnDef) {
+    if (!col.fieldId) return;
+    if (!confirm(`Remove the field "${col.label}"? The column is removed; any existing values are kept in the database.`)) return;
+    try {
+      await api.disableField(col.fieldId);
+      setFieldsReload((x) => x + 1);
+      persist(visible.filter((k) => k !== col.key));
+      toast("success", `Field "${col.label}" removed.`);
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "Could not remove field.");
+    }
   }
 
   const changeSearch = (v: string) => { setSearch(v); setPage(1); };
@@ -386,8 +499,7 @@ export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since, onSet
       <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4" style={{ borderColor: "var(--border)" }}>
         <h2 className="text-base font-semibold capitalize">{kind === "buyer" ? "Buyers" : "Sellers"}</h2>
         <Toolbar search={search} setSearch={changeSearch}>
-          <ColumnsPopover columns={columns} visible={visible} onToggle={toggleColumn} onReset={resetColumns} />
-          <SettingsButton onClick={onSettings} />
+          <ColumnsPopover columns={columns} visible={visible} onToggle={toggleColumn} onReset={resetColumns} onCreateField={createField} onRemoveField={removeField} />
         </Toolbar>
       </div>
       <div className="scroll-area overflow-x-auto">
@@ -450,7 +562,7 @@ function bandTone(band: string): "success" | "accent" | "warning" | "neutral" {
   return "neutral";
 }
 
-export function MatchingTable({ refreshKey, onSettings }: { refreshKey: number; onSettings: () => void }) {
+export function MatchingTable({ refreshKey }: { refreshKey: number }) {
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState("");
   const [page, setPage] = useState(1);
@@ -493,7 +605,6 @@ export function MatchingTable({ refreshKey, onSettings }: { refreshKey: number; 
             <option value="75">Strong (75+)</option>
             <option value="60">Possible (60+)</option>
           </select>
-          <SettingsButton onClick={onSettings} />
         </Toolbar>
       </div>
       <div className="scroll-area overflow-x-auto">

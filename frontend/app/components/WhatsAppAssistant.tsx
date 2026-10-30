@@ -271,6 +271,21 @@ function ResultCard({ result, mediaResult, onViewAll }: {
   const sellerCount = result.createdRecords.filter((r) => r.type === "seller").length;
   const total = result.createdRecords.length;
 
+  // A duplicate was already processed earlier — don't show extraction steps or a
+  // misleading "confidence 0%".
+  if (result.duplicate) {
+    return (
+      <div className="rounded-xl border p-3 text-xs" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="flex items-center gap-2 font-medium" style={{ color: "var(--info)" }}>
+          <CheckCircle2 size={14} aria-hidden="true" /> Already in your records
+        </div>
+        <p className="mt-1" style={{ color: "var(--muted)" }}>
+          This message was processed earlier, so nothing new was added.
+        </p>
+      </div>
+    );
+  }
+
   const steps: Array<{ ok: boolean; label: string }> = [
     { ok: true, label: result.duplicate ? "Detected as duplicate" : `Found ${total} property record${total === 1 ? "" : "s"}` },
     { ok: result.detectedType !== "unknown", label: `Classified as ${result.detectedType}` },

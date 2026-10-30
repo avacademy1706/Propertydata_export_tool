@@ -15,6 +15,9 @@ export interface ScoringConfig {
   bands: { excellent: number; strong: number; possible: number };
 }
 
+/** Matches below this score, or with insufficient data, are not persisted (noise). */
+export const MIN_PERSIST_SCORE = 40;
+
 export const DEFAULT_SCORING: ScoringConfig = {
   version: "2026.10.1",
   weights: {

@@ -91,7 +91,6 @@ function mediaCounts(links: { buyerId: string | null; sellerId: string | null }[
 function buildBuyersSheet(wb: ExcelJS.Workbook, buyers: Array<Buyer & { mediaLinks: unknown[] }>) {
   const sheet = wb.addWorksheet("Buyers", { properties: { defaultColWidth: 16 } });
   const cols: Col[] = [
-    { header: "Buyer ID", width: 38 },
     { header: "Date", width: 12, style: { numFmt: "yyyy-mm-dd" } },
     { header: "Name", width: 18 },
     { header: "Phone Number", width: 16 },
@@ -118,7 +117,6 @@ function buildBuyersSheet(wb: ExcelJS.Workbook, buyers: Array<Buyer & { mediaLin
     { header: "Photo Count", width: 12, style: { numFmt: "0" } },
     { header: "Notes", width: 30 },
     { header: "Source", width: 10 },
-    { header: "Source Message ID", width: 38 },
     { header: "Verification Status", width: 16 },
     { header: "Created At", width: 20, style: { numFmt: "yyyy-mm-dd hh:mm" } },
   ];
@@ -126,7 +124,6 @@ function buildBuyersSheet(wb: ExcelJS.Workbook, buyers: Array<Buyer & { mediaLin
 
   for (const b of buyers) {
     sheet.addRow([
-      b.id,
       b.receivedAt,
       b.contactName ?? "",
       b.phone ?? "",
@@ -153,7 +150,6 @@ function buildBuyersSheet(wb: ExcelJS.Workbook, buyers: Array<Buyer & { mediaLin
       mediaCounts(b.mediaLinks as { buyerId: string | null; sellerId: string | null }[]),
       b.notes ?? "",
       b.sourceMessageId ? "WhatsApp/Manual" : "Manual",
-      b.sourceMessageId ?? "",
       b.verificationStatus,
       b.createdAt,
     ]);
@@ -165,7 +161,6 @@ function buildBuyersSheet(wb: ExcelJS.Workbook, buyers: Array<Buyer & { mediaLin
 function buildSellersSheet(wb: ExcelJS.Workbook, sellers: Array<Seller & { mediaLinks: unknown[] }>) {
   const sheet = wb.addWorksheet("Sellers", { properties: { defaultColWidth: 16 } });
   const cols: Col[] = [
-    { header: "Property ID", width: 38 },
     { header: "Date", width: 12, style: { numFmt: "yyyy-mm-dd" } },
     { header: "Name", width: 18 },
     { header: "Phone Number", width: 16 },
@@ -198,7 +193,6 @@ function buildSellersSheet(wb: ExcelJS.Workbook, sellers: Array<Seller & { media
     { header: "Claims (unverified)", width: 26 },
     { header: "Photo Count", width: 12, style: { numFmt: "0" } },
     { header: "Notes", width: 30 },
-    { header: "Source Message ID", width: 38 },
     { header: "Availability", width: 14 },
     { header: "Verification Status", width: 16 },
     { header: "Created At", width: 20, style: { numFmt: "yyyy-mm-dd hh:mm" } },
@@ -207,7 +201,6 @@ function buildSellersSheet(wb: ExcelJS.Workbook, sellers: Array<Seller & { media
 
   for (const s of sellers) {
     sheet.addRow([
-      s.id,
       s.receivedAt,
       s.contactName ?? "",
       s.phone ?? "",
@@ -240,7 +233,6 @@ function buildSellersSheet(wb: ExcelJS.Workbook, sellers: Array<Seller & { media
       (s.claims ?? []).join(" | "),
       mediaCounts(s.mediaLinks as { buyerId: string | null; sellerId: string | null }[]),
       s.notes ?? "",
-      s.sourceMessageId ?? "",
       s.availability ?? s.status,
       s.verificationStatus,
       s.createdAt,
@@ -256,11 +248,8 @@ function buildMatchingSheet(
 ) {
   const sheet = wb.addWorksheet("Matching", { properties: { defaultColWidth: 16 } });
   const cols: Col[] = [
-    { header: "Match ID", width: 38 },
-    { header: "Buyer ID", width: 38 },
     { header: "Buyer Name", width: 18 },
     { header: "Buyer Phone", width: 16 },
-    { header: "Seller ID", width: 38 },
     { header: "Seller Name", width: 18 },
     { header: "Seller Phone", width: 16 },
     { header: "Property Location", width: 22 },
@@ -290,11 +279,8 @@ function buildMatchingSheet(
     const reasons = (m.matchReasons ?? []) as string[];
     const mismatches = (m.mismatchReasons ?? []) as string[];
     sheet.addRow([
-      m.id,
-      m.buyerId,
       m.buyer.contactName ?? "",
       m.buyer.phone ?? "",
-      m.sellerId,
       m.seller.contactName ?? "",
       m.seller.phone ?? "",
       m.seller.location ?? "",
@@ -321,11 +307,11 @@ function buildMatchingSheet(
   if (matches.length === 0) sheet.addRow(["No matches yet. Add buyers and sellers to generate matches."]);
   styleHeader(sheet, cols.length);
 
-  // Conditional formatting on the Match % column (P) for data rows.
+  // Conditional formatting on the Match % column (M) for data rows.
   if (matches.length > 0) {
     const lastRow = matches.length + 1;
     sheet.addConditionalFormatting({
-      ref: `P2:P${lastRow}`,
+      ref: `M2:M${lastRow}`,
       rules: [
         { type: "cellIs", operator: "greaterThan", formulae: ["89.999"], priority: 1, style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFBBF7D0" } } } },
         { type: "cellIs", operator: "between", formulae: ["75", "89.999"], priority: 2, style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFD9F99D" } } } },

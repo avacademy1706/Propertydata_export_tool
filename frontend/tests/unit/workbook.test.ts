@@ -97,8 +97,8 @@ describe("composeWorkbook", () => {
   it("uses numeric cells for prices", () => {
     const wb = composeWorkbook([buyerRow()], [sellerRow()], []);
     const sellers = wb.getWorksheet("Sellers")!;
-    // Price column index from the Sellers column list (1-based): Price is column 13.
-    const priceCell = sellers.getRow(2).getCell(13);
+    // Price column index from the Sellers column list (1-based): Price is column 12.
+    const priceCell = sellers.getRow(2).getCell(12);
     expect(typeof priceCell.value).toBe("number");
     expect(priceCell.value).toBe(6_500_000);
   });

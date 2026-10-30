@@ -8,7 +8,6 @@ import { SummaryCards } from "@/app/components/SummaryCards.tsx";
 import { RecordsTable, MatchingTable } from "@/app/components/tables.tsx";
 import { WhatsAppAssistant } from "@/app/components/WhatsAppAssistant.tsx";
 import { DetailDrawer } from "@/app/components/DetailDrawer.tsx";
-import { FieldSettings } from "@/app/components/FieldSettings.tsx";
 import type { StatusResponse } from "@/app/lib/types.ts";
 
 type Tab = "buyers" | "sellers" | "matching";
@@ -90,7 +89,6 @@ function DashboardInner() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [drawer, setDrawer] = useState<{ kind: "buyer" | "seller"; id: string } | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [datePreset, setDatePreset] = useState("all");
   const [dateMenu, setDateMenu] = useState(false);
@@ -114,7 +112,6 @@ function DashboardInner() {
   useEffect(loadStatus, [loadStatus, refreshKey]);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
-  const openSettings = useCallback(() => setSettingsOpen(true), []);
 
   async function recalc() {
     setRecalculating(true);
@@ -196,9 +193,9 @@ function DashboardInner() {
             ))}
           </div>
 
-          {tab === "buyers" && <RecordsTable key={`buyer-${since ?? "all"}`} kind="buyer" refreshKey={refreshKey} since={since} onOpen={(id) => setDrawer({ kind: "buyer", id })} onChanged={refresh} onSettings={openSettings} />}
-          {tab === "sellers" && <RecordsTable key={`seller-${since ?? "all"}`} kind="seller" refreshKey={refreshKey} since={since} onOpen={(id) => setDrawer({ kind: "seller", id })} onChanged={refresh} onSettings={openSettings} />}
-          {tab === "matching" && <MatchingTable refreshKey={refreshKey} onSettings={openSettings} />}
+          {tab === "buyers" && <RecordsTable key={`buyer-${since ?? "all"}`} kind="buyer" refreshKey={refreshKey} since={since} onOpen={(id) => setDrawer({ kind: "buyer", id })} onChanged={refresh} />}
+          {tab === "sellers" && <RecordsTable key={`seller-${since ?? "all"}`} kind="seller" refreshKey={refreshKey} since={since} onOpen={(id) => setDrawer({ kind: "seller", id })} onChanged={refresh} />}
+          {tab === "matching" && <MatchingTable refreshKey={refreshKey} />}
         </main>
       </div>
 
@@ -219,7 +216,6 @@ function DashboardInner() {
       )}
 
       {drawer && <DetailDrawer kind={drawer.kind} id={drawer.id} onClose={() => setDrawer(null)} onChanged={refresh} />}
-      {settingsOpen && <FieldSettings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

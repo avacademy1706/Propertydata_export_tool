@@ -1,6 +1,6 @@
 import type { Buyer, Seller, Prisma } from "@/generated/prisma/client.ts";
 import { prisma } from "@/server/db/client.ts";
-import { DEFAULT_SCORING } from "@/server/matching/config.ts";
+import { DEFAULT_SCORING, MIN_PERSIST_SCORE } from "@/server/matching/config.ts";
 import {
   isEligiblePair,
   scoreMatch,
@@ -82,6 +82,14 @@ async function upsertMatch(
     return false;
   }
   const result = scoreMatch(bs, ss, DEFAULT_SCORING);
+  // Only keep meaningful matches: drop insufficient data, a known property-type
+  // mismatch (e.g. a plot buyer vs an apartment), and weak scores — so the
+  // Matching view and export aren't cluttered with irrelevant pairs.
+  const typeMismatch = result.rawScores.propertyType === 0;
+  if (result.insufficientData || typeMismatch || result.matchScore < MIN_PERSIST_SCORE) {
+    await prisma.match.deleteMany({ where: { tenantId, buyerId: buyer.id, sellerId: seller.id } });
+    return false;
+  }
   await prisma.match.upsert({
     where: { tenantId_buyerId_sellerId: { tenantId, buyerId: buyer.id, sellerId: seller.id } },
     create: {

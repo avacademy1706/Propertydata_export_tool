@@ -162,6 +162,8 @@ export async function processMessage(input: IngestInput): Promise<IngestResult> 
 
   await prisma.$transaction(async (tx) => {
     let sequence = 1;
+    let skipped = 0;
+    void skipped;
     for (const record of keepRecords) {
       const opts = {
         tenantId: input.tenantId,
@@ -170,13 +172,47 @@ export async function processMessage(input: IngestInput): Promise<IngestResult> 
         regionRules,
       };
       if (record.record_type === "buyer") {
-        const buyer = await tx.buyer.create({ data: mapBuyer(record, opts) });
+        const data = mapBuyer(record, opts);
+        // Skip an obvious re-entry of the same requirement (same type, city,
+        // budget and BHK). A buyer with genuinely different criteria differs on
+        // these, so legitimate separate requirements are preserved.
+        if (data.propertyType && data.maxBudget != null) {
+          const dup = await tx.buyer.findFirst({
+            where: {
+              tenantId: input.tenantId,
+              propertyType: data.propertyType as string,
+              city: (data.city as string | null) ?? null,
+              maxBudget: data.maxBudget as number,
+              bhk: (data.bhk as number | null) ?? null,
+              status: { notIn: ["ARCHIVED"] },
+            },
+          });
+          if (dup) { skipped += 1; sequence += 1; continue; }
+        }
+        const buyer = await tx.buyer.create({ data });
         if (weak || record.uncertain_fields.length > 0) {
           await tx.buyer.update({ where: { id: buyer.id }, data: { verificationStatus: "NEEDS_REVIEW" } });
         }
         created.push({ id: buyer.id, type: "buyer", sourceSegment: record.source_segment });
       } else {
-        const seller = await tx.seller.create({ data: mapSeller(record, opts) });
+        const data = mapSeller(record, opts);
+        // Skip an obvious re-listing of the same property (same type, location,
+        // price and BHK). Different properties differ on these, so a seller with
+        // multiple distinct listings is preserved.
+        if (data.propertyType && data.priceAmount != null) {
+          const dup = await tx.seller.findFirst({
+            where: {
+              tenantId: input.tenantId,
+              propertyType: data.propertyType as string,
+              location: (data.location as string | null) ?? null,
+              priceAmount: data.priceAmount as number,
+              bhk: (data.bhk as number | null) ?? null,
+              status: { notIn: ["ARCHIVED", "SOLD", "RENTED"] },
+            },
+          });
+          if (dup) { skipped += 1; sequence += 1; continue; }
+        }
+        const seller = await tx.seller.create({ data });
         if (weak || record.uncertain_fields.length > 0) {
           await tx.seller.update({ where: { id: seller.id }, data: { verificationStatus: "NEEDS_REVIEW" } });
         }
