@@ -1,0 +1,550 @@
+// Real Estate Data Tool - database schema (PostgreSQL)
+// The relational database is the source of truth; Excel is only an export format.
+// Every business table carries tenant_id so multiple agencies can share one deployment.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Channel {
+  WHATSAPP
+  MANUAL
+}
+
+enum ProcessingStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  NEEDS_REVIEW
+  FAILED
+  DUPLICATE
+  HELD // sender not yet approved
+  REJECTED // sender blocked / not allowed
+}
+
+enum DetectedType {
+  BUYER
+  SELLER
+  BOTH
+  UNKNOWN
+}
+
+enum TransactionType {
+  BUY
+  SALE
+  RENT
+  LEASE
+}
+
+enum BuyerStatus {
+  NEW
+  ACTIVE
+  CONTACTED
+  CLOSED
+  ARCHIVED
+}
+
+enum SellerStatus {
+  AVAILABLE
+  UNDER_OFFER
+  SOLD
+  RENTED
+  ARCHIVED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  NEEDS_REVIEW
+}
+
+enum MatchStatus {
+  NEW
+  REVIEWED
+  CONTACTED
+  SHORTLISTED
+  REJECTED
+}
+
+enum FieldEntity {
+  BUYER
+  SELLER
+  BOTH
+}
+
+enum FieldDataType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  DECIMAL
+  CURRENCY
+  DATE
+  BOOLEAN
+  SINGLE_SELECT
+  MULTI_SELECT
+  PHONE
+  EMAIL
+  URL
+  LOCATION
+  MEASUREMENT
+  MEDIA
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
+enum UploadStatus {
+  PENDING
+  STORED
+  FAILED
+  DELETED
+}
+
+enum SenderStatus {
+  APPROVED
+  PENDING
+  BLOCKED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sourceMessages SourceMessage[]
+  buyers         Buyer[]
+  sellers        Seller[]
+  matches        Match[]
+  fields         CustomFieldDefinition[]
+  media          MediaAttachment[]
+  senders        AuthorizedSender[]
+  settings       Setting[]
+  conversions    LandUnitConversion[]
+  auditLogs      AuditLog[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
+// Source messages (raw WhatsApp / manual input, preserved for audit & retry)
+// ---------------------------------------------------------------------------
+
+model SourceMessage {
+  id                       String           @id @default(uuid())
+  tenantId                 String           @map("tenant_id")
+  channel                  Channel
+  externalMessageId        String?          @map("external_message_id")
+  senderPhone              String?          @map("sender_phone")
+  senderName               String?          @map("sender_name")
+  rawText                  String           @map("raw_text")
+  contentHash              String           @map("content_hash")
+  hint                     String?          // auto | buyer | seller
+  receivedAt               DateTime         @default(now()) @map("received_at")
+  processingStatus         ProcessingStatus @default(RECEIVED) @map("processing_status")
+  detectedType             DetectedType?    @map("detected_type")
+  classificationConfidence Decimal?         @map("classification_confidence") @db.Decimal(4, 3)
+  classificationReason     String?          @map("classification_reason")
+  needsReviewReasons       Json?            @map("needs_review_reasons")
+  errorMessage             String?          @map("error_message")
+  aiProvider               String?          @map("ai_provider")
+  aiModel                  String?          @map("ai_model")
+  aiRawResult              Json?            @map("ai_raw_result")
+  processingSummary        String?          @map("processing_summary")
+  processedAt              DateTime?        @map("processed_at")
+  createdAt                DateTime         @default(now()) @map("created_at")
+  updatedAt                DateTime         @updatedAt @map("updated_at")
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  buyers  Buyer[]
+  sellers Seller[]
+  media   MediaAttachment[]
+
+  @@unique([channel, externalMessageId])
+  @@index([tenantId, contentHash])
+  @@index([tenantId, processingStatus])
+  @@index([tenantId, receivedAt])
+  @@map("source_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Buyers (requirements)
+// ---------------------------------------------------------------------------
+
+model Buyer {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  sourceMessageId String? @map("source_message_id")
+  listingSequence Int     @default(1) @map("listing_sequence")
+  sourceSegment   String? @map("source_segment")
+
+  contactName String? @map("contact_name")
+  phone       String?
+  email       String?
+
+  transactionType    TransactionType @default(BUY) @map("transaction_type")
+  propertyCategory   String?         @map("property_category")
+  propertyType       String?         @map("property_type")
+  preferredLocations String[]        @default([]) @map("preferred_locations")
+  district           String?
+  city               String?
+  fullAddress        String?         @map("full_address")
+
+  minBudget   Decimal? @map("min_budget") @db.Decimal(16, 2)
+  maxBudget   Decimal? @map("max_budget") @db.Decimal(16, 2)
+  budgetBasis String?  @default("total") @map("budget_basis") // total | per_sq_ft | per_sq_yd | per_acre | per_bigha | monthly | annual
+  currency    String   @default("INR")
+
+  bhk          Int?
+  minAreaValue Decimal? @map("min_area_value") @db.Decimal(14, 2)
+  maxAreaValue Decimal? @map("max_area_value") @db.Decimal(14, 2)
+  areaUnit     String?  @map("area_unit") // sq_ft | sq_m | sq_yd | acre | bigha | biswa
+  areaType     String?  @map("area_type") // plot | built_up | carpet | super | land | unknown
+
+  frontWidthValue Decimal? @map("front_width_value") @db.Decimal(10, 2)
+  frontWidthUnit  String?  @map("front_width_unit")
+  roadWidthValue  Decimal? @map("road_width_value") @db.Decimal(10, 2)
+  roadWidthUnit   String?  @map("road_width_unit")
+
+  furnishingStatus String?  @map("furnishing_status")
+  preferredFacing  String[] @default([]) @map("preferred_facing")
+  requiredFeatures String[] @default([]) @map("required_features")
+  preferredFloor   String?  @map("preferred_floor")
+  timeline         String?
+  intendedUse      String?  @map("intended_use")
+  dealSource       String?  @map("deal_source")
+  notes            String?
+
+  customFields    Json @default("{}") @map("custom_fields")
+  fieldProvenance Json @default("{}") @map("field_provenance") // field_key -> "ai" | "user"
+  rawExtraction   Json? @map("raw_extraction")
+  uncertainFields String[] @default([]) @map("uncertain_fields")
+
+  status               BuyerStatus        @default(NEW)
+  extractionConfidence Decimal?           @map("extraction_confidence") @db.Decimal(4, 3)
+  verificationStatus   VerificationStatus @default(PENDING) @map("verification_status")
+  receivedAt           DateTime           @default(now()) @map("received_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceMessage SourceMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  matches       Match[]
+  mediaLinks    MediaLink[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, city])
+  @@index([tenantId, propertyType])
+  @@index([tenantId, createdAt])
+  @@map("buyers")
+}
+
+// ---------------------------------------------------------------------------
+// Sellers (property listings)
+// ---------------------------------------------------------------------------
+
+model Seller {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  sourceMessageId String? @map("source_message_id")
+  listingSequence Int     @default(1) @map("listing_sequence")
+  sourceSegment   String? @map("source_segment")
+
+  contactName String? @map("contact_name")
+  phone       String?
+  email       String?
+
+  transactionType  TransactionType @default(SALE) @map("transaction_type")
+  propertyCategory String?         @map("property_category")
+  propertyType     String?         @map("property_type")
+  location         String?
+  district         String?
+  city             String?
+  fullAddress      String?         @map("full_address")
+  landmark         String?
+
+  priceAmount Decimal? @map("price_amount") @db.Decimal(16, 2)
+  priceBasis  String?  @default("total") @map("price_basis")
+  currency    String   @default("INR")
+
+  bhk           Int?
+  bathrooms     Int?
+  areaValue     Decimal? @map("area_value") @db.Decimal(14, 2)
+  areaUnit      String?  @map("area_unit")
+  areaType      String?  @map("area_type")
+  plotAreaValue Decimal? @map("plot_area_value") @db.Decimal(14, 2)
+  plotAreaUnit  String?  @map("plot_area_unit")
+
+  frontWidthValue Decimal? @map("front_width_value") @db.Decimal(10, 2)
+  frontWidthUnit  String?  @map("front_width_unit")
+  roadWidthValue  Decimal? @map("road_width_value") @db.Decimal(10, 2)
+  roadWidthUnit   String?  @map("road_width_unit")
+
+  furnishingStatus      String?  @map("furnishing_status")
+  facing                String?
+  floor                 String?
+  buildingConfiguration String?  @map("building_configuration")
+  propertySetting       String?  @map("property_setting")
+  features              String[] @default([])
+  availability          String?
+  dealSource            String?  @map("deal_source")
+  googleMapsUrl         String?  @map("google_maps_url")
+  latitude              Decimal? @db.Decimal(9, 6)
+  longitude             Decimal? @db.Decimal(9, 6)
+  claims                String[] @default([]) // unverified statements e.g. "Dhara 80 done"
+  notes                 String?
+
+  customFields    Json @default("{}") @map("custom_fields")
+  fieldProvenance Json @default("{}") @map("field_provenance")
+  rawExtraction   Json? @map("raw_extraction")
+  uncertainFields String[] @default([]) @map("uncertain_fields")
+
+  status               SellerStatus       @default(AVAILABLE)
+  extractionConfidence Decimal?           @map("extraction_confidence") @db.Decimal(4, 3)
+  verificationStatus   VerificationStatus @default(PENDING) @map("verification_status")
+  receivedAt           DateTime           @default(now()) @map("received_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceMessage SourceMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  matches       Match[]
+  mediaLinks    MediaLink[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, city])
+  @@index([tenantId, propertyType])
+  @@index([tenantId, createdAt])
+  @@map("sellers")
+}
+
+// ---------------------------------------------------------------------------
+// Matches (persisted, deterministic scoring results)
+// ---------------------------------------------------------------------------
+
+model Match {
+  id               String      @id @default(uuid())
+  tenantId         String      @map("tenant_id")
+  buyerId          String      @map("buyer_id")
+  sellerId         String      @map("seller_id")
+  matchScore       Decimal     @map("match_score") @db.Decimal(5, 2)
+  dataCompleteness Decimal     @map("data_completeness") @db.Decimal(4, 3)
+  insufficientData Boolean     @default(false) @map("insufficient_data")
+  scoreBreakdown   Json        @map("score_breakdown")
+  matchReasons     Json        @map("match_reasons")
+  mismatchReasons  Json        @map("mismatch_reasons")
+  unknownCriteria  Json        @map("unknown_criteria")
+  scoringVersion   String      @map("scoring_version")
+  status           MatchStatus @default(NEW)
+  calculatedAt     DateTime    @default(now()) @map("calculated_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  buyer  Buyer  @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, buyerId, sellerId])
+  @@index([tenantId, matchScore])
+  @@map("matches")
+}
+
+// ---------------------------------------------------------------------------
+// Administrator-configurable fields
+// ---------------------------------------------------------------------------
+
+model CustomFieldDefinition {
+  id              String        @id @default(uuid())
+  tenantId        String        @map("tenant_id")
+  fieldKey        String        @map("field_key")
+  label           String
+  entityTypes     FieldEntity   @default(BOTH) @map("entity_types")
+  dataType        FieldDataType @default(TEXT) @map("data_type")
+  isCore          Boolean       @default(false) @map("is_core") // maps to a typed column
+  options         Json          @default("[]")
+  aliases         Json          @default("[]")
+  unitOptions     Json          @default("[]") @map("unit_options")
+  defaultValue    Json?         @map("default_value")
+  description     String?
+  isRequired      Boolean       @default(false) @map("is_required")
+  isActive        Boolean       @default(true) @map("is_active")
+  isSearchable    Boolean       @default(false) @map("is_searchable")
+  showInTable     Boolean       @default(false) @map("show_in_table")
+  showInDetail    Boolean       @default(true) @map("show_in_detail")
+  includeInExport Boolean       @default(true) @map("include_in_export")
+  aiExtractable   Boolean       @default(true) @map("ai_extractable")
+  manualEntry     Boolean       @default(true) @map("manual_entry")
+  displayOrder    Int           @default(0) @map("display_order")
+  exportOrder     Int?          @map("export_order")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, fieldKey])
+  @@index([tenantId, displayOrder])
+  @@map("custom_field_definitions")
+}
+
+// ---------------------------------------------------------------------------
+// Media attachments
+// ---------------------------------------------------------------------------
+
+model MediaAttachment {
+  id               String       @id @default(uuid())
+  tenantId         String       @map("tenant_id")
+  sourceMessageId  String?      @map("source_message_id")
+  provider         Channel
+  providerMediaId  String?      @map("provider_media_id")
+  originalFilename String?      @map("original_filename")
+  storedFilename   String       @map("stored_filename")
+  storageKey       String       @map("storage_key")
+  thumbnailKey     String?      @map("thumbnail_key")
+  mimeType         String       @map("mime_type")
+  mediaType        MediaType    @map("media_type")
+  fileSizeBytes    Int          @map("file_size_bytes")
+  caption          String?
+  width            Int?
+  height           Int?
+  durationSeconds  Decimal?     @map("duration_seconds") @db.Decimal(10, 2)
+  checksum         String
+  uploadStatus     UploadStatus @default(STORED) @map("upload_status")
+  aiDescription    String?      @map("ai_description") // AI suggestion, never a verified fact
+  extractedText    String?      @map("extracted_text")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  deletedAt        DateTime?    @map("deleted_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceMessage SourceMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  links         MediaLink[]
+
+  @@index([tenantId, checksum])
+  @@index([tenantId, sourceMessageId])
+  @@map("media_attachments")
+}
+
+// One media file can be linked to several records without duplicating the file.
+model MediaLink {
+  id       String  @id @default(uuid())
+  mediaId  String  @map("media_id")
+  buyerId  String? @map("buyer_id")
+  sellerId String? @map("seller_id")
+
+  media  MediaAttachment @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  buyer  Buyer?          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  seller Seller?         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, buyerId, sellerId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@map("media_links")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp sender authorization
+// ---------------------------------------------------------------------------
+
+model AuthorizedSender {
+  id          String       @id @default(uuid())
+  tenantId    String       @map("tenant_id")
+  phoneE164   String       @map("phone_e164")
+  displayName String?      @map("display_name")
+  status      SenderStatus @default(APPROVED)
+  notes       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([phoneE164])
+  @@index([tenantId])
+  @@map("authorized_senders")
+}
+
+// Raw webhook deliveries for idempotency (duplicate deliveries are ignored).
+model WebhookEvent {
+  id         String   @id @default(uuid())
+  provider   String   @default("whatsapp")
+  eventKey   String   @map("event_key") // provider message/status id
+  eventType  String   @map("event_type")
+  payload    Json
+  receivedAt DateTime @default(now()) @map("received_at")
+  outcome    String?
+
+  @@unique([provider, eventKey])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// Settings, conversions, audit
+// ---------------------------------------------------------------------------
+
+model Setting {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("settings")
+}
+
+// Region-specific land unit conversions (bigha/biswa vary by district/state).
+model LandUnitConversion {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  unit      String // bigha | biswa | other local unit
+  region    String // e.g. "Lucknow, Uttar Pradesh"
+  sqFtPerUnit Decimal @map("sq_ft_per_unit") @db.Decimal(14, 4)
+  verified  Boolean  @default(false)
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, unit, region])
+  @@map("land_unit_conversions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  entityType String   @map("entity_type") // buyer | seller | match | field | sender | setting
+  entityId   String   @map("entity_id")
+  action     String // create | update | delete | reprocess | status_change
+  changes    Json?
+  actor      String   @default("system")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
