@@ -28,3 +28,5 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// Deploy: Vercel builds from frontend/ with Supabase (Postgres + Storage).
