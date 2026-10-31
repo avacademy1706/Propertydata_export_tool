@@ -171,7 +171,7 @@ function DashboardInner() {
                 <Calendar size={15} aria-hidden="true" /> <span className="hidden sm:inline">{dateLabel}</span> <ChevronDown size={14} aria-hidden="true" />
               </button>
               {dateMenu && (
-                <div className="pop absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-lg border" style={{ background: "var(--surface)" }}>
+                <div className="pop absolute left-0 z-30 mt-1 w-40 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border sm:left-auto sm:right-0" style={{ background: "var(--surface)" }}>
                   {DATE_PRESETS.map((p) => (
                     <button key={p.key} onClick={() => { setDatePreset(p.key); setDateMenu(false); }} className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--surface-muted)]" style={{ color: p.key === datePreset ? "var(--accent)" : "var(--foreground)" }}>
                       {p.label}

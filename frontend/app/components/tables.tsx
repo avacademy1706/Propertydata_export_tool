@@ -283,7 +283,7 @@ function ColumnsPopover({ columns, visible, onToggle, onReset, onCreateField, on
         <Columns3 size={15} aria-hidden="true" /> Columns <Badge tone="neutral">{visible.length}</Badge>
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-64 rounded-xl border shadow-lg" style={{ background: "var(--surface)" }}>
+        <div className="absolute left-0 z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-xl border shadow-lg sm:left-auto sm:right-0" style={{ background: "var(--surface)" }}>
           <div className="flex items-center justify-between border-b px-3 py-2" style={{ borderColor: "var(--border)" }}>
             <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>Show columns</span>
             <button onClick={onReset} className="text-xs underline" style={{ color: "var(--accent)" }}>Reset</button>

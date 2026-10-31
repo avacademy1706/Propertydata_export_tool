@@ -25,18 +25,18 @@ export function SummaryCards({ summary }: { summary: Summary | null }) {
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       {cards.map((c) => (
-        <div key={c.label} className="elevated rounded-2xl border p-5" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-          <div className="flex items-start gap-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: c.soft, color: c.color }}>
+        <div key={c.label} className="elevated rounded-2xl border p-4 sm:p-5" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+          <div className="flex items-start gap-3 sm:gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11" style={{ background: c.soft, color: c.color }}>
               <c.icon size={20} aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm" style={{ color: "var(--muted)" }}>
+              <p className="truncate text-xs sm:text-sm" style={{ color: "var(--muted)" }}>
                 {c.label}
               </p>
-              <p className="tabular mt-0.5 text-3xl font-bold leading-none">{c.value}</p>
+              <p className="tabular mt-0.5 text-2xl font-bold leading-none sm:text-3xl">{c.value}</p>
             </div>
           </div>
           {c.trend && <TrendRow trend={c.trend} />}
