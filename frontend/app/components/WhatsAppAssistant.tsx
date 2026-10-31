@@ -144,7 +144,7 @@ export function WhatsAppAssistant({ onProcessed, onViewAll, onClose }: {
       </div>
 
       {/* Conversation */}
-      <div ref={scrollRef} className="scroll-area flex-1 space-y-4 overflow-y-auto p-4">
+      <div ref={scrollRef} className="scroll-area min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         <div className="rounded-xl p-3" style={{ background: "var(--whatsapp-soft)" }}>
           <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--whatsapp)" }}>
             <CheckCircle2 size={16} /> Ready to process
@@ -160,7 +160,7 @@ export function WhatsAppAssistant({ onProcessed, onViewAll, onClose }: {
       </div>
 
       {/* Composer */}
-      <div className="border-t p-3" style={{ borderColor: "var(--border)" }}>
+      <div className="border-t p-3" style={{ borderColor: "var(--border)", paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         <div role="group" aria-label="Classification hint" className="mb-2 inline-flex overflow-hidden rounded-md border text-xs" style={{ borderColor: "var(--border-strong)" }}>
           {(["auto", "buyer", "seller"] as const).map((h) => (
             <button key={h} onClick={() => setHint(h)} aria-pressed={hint === h} className="px-2.5 py-1 capitalize" style={{ background: hint === h ? "var(--accent)" : "var(--surface)", color: hint === h ? "#fff" : "var(--muted)" }}>

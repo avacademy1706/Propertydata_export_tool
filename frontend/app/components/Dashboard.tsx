@@ -194,7 +194,7 @@ function DashboardInner() {
           </div>
         </header>
 
-        <main id="main-content" aria-label="Property records" className="scroll-area flex-1 overflow-y-auto p-4 sm:p-6">
+        <main id="main-content" aria-label="Property records" className="scroll-area min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold">{title}</h1>
@@ -237,12 +237,10 @@ function DashboardInner() {
         </div>
       )}
 
-      {/* Assistant — overlay sheet below lg */}
+      {/* Assistant — full-screen overlay below lg (always on-screen; closed via its X) */}
       {assistantOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" style={{ background: "rgba(10,15,29,0.5)" }} onClick={() => setAssistantOpen(false)}>
-          <div className="absolute inset-y-0 right-0 w-full max-w-md animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
-            <WhatsAppAssistant onProcessed={refresh} onViewAll={(t) => { setTab(t); setAssistantOpen(false); }} onClose={() => setAssistantOpen(false)} />
-          </div>
+        <div className="fixed left-0 top-0 z-50 h-dvh w-screen animate-slide-in-right lg:hidden" style={{ background: "var(--surface)" }}>
+          <WhatsAppAssistant onProcessed={refresh} onViewAll={(t) => { setTab(t); setAssistantOpen(false); }} onClose={() => setAssistantOpen(false)} />
         </div>
       )}
 
