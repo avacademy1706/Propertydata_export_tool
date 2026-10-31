@@ -33,7 +33,7 @@ export function SummaryCards({ summary }: { summary: Summary | null }) {
               <c.icon size={20} aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-xs sm:text-sm" style={{ color: "var(--muted)" }}>
+              <p className="text-xs leading-tight sm:text-sm" style={{ color: "var(--muted)" }}>
                 {c.label}
               </p>
               <p className="tabular mt-0.5 text-2xl font-bold leading-none sm:text-3xl">{c.value}</p>
