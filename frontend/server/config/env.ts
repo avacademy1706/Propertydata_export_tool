@@ -57,6 +57,7 @@ const EnvSchema = z.object({
 
   AUTH_SECRET: optionalString,
   APP_ACCESS_PASSWORD: optionalString,
+  APP_ADMIN_EMAIL: optionalString,
   GRIDCRAFT_WEB_URL: optionalString,
   LOG_MESSAGE_CONTENT: boolString,
 });
@@ -155,6 +156,7 @@ export interface AppConfig {
     enabled: boolean;
     secret?: string;
     password?: string;
+    adminEmail: string;
   };
   gridcraftWebUrl?: string;
   logMessageContent: boolean;
@@ -282,6 +284,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       enabled: authEnabled,
       secret: env.AUTH_SECRET,
       password: env.APP_ACCESS_PASSWORD,
+      adminEmail: (env.APP_ADMIN_EMAIL ?? "admin@propertydesk.local").toLowerCase(),
     },
     gridcraftWebUrl: env.GRIDCRAFT_WEB_URL,
     logMessageContent: env.LOG_MESSAGE_CONTENT,

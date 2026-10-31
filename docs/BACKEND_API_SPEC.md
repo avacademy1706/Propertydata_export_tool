@@ -24,6 +24,7 @@ working unchanged.
 4. [Data model](#4-data-model)
 5. [Conventions (auth, tenancy, pagination, errors, idempotency)](#5-conventions)
 6. [API reference](#6-api-reference)
+   - 6.0 [Authentication (login / logout / me)](#60-authentication)
    - 6.1 [Health & status](#61-health--status)
    - 6.2 [Message processing](#62-message-processing)
    - 6.3 [Buyers](#63-buyers)
@@ -195,8 +196,9 @@ SQS_QUEUE_URL=
 PROCESS_MODE=async                   # async (SQS) | sync (process in-request)
 
 # Security
-AUTH_SECRET=                         # secret, signs session/JWT
-APP_ACCESS_PASSWORD=                 # when set, dashboard & API require auth
+AUTH_SECRET=                         # secret, signs the session cookie (HMAC-SHA256). Required when APP_ACCESS_PASSWORD is set.
+APP_ACCESS_PASSWORD=                 # when set, the whole dashboard & API require login (see §6.0). Empty = auth disabled (trusted local dev only).
+APP_ADMIN_EMAIL=admin@propertydesk.local  # the single admin login email; checked with APP_ACCESS_PASSWORD on /auth/login
 RATE_LIMIT_PER_MIN=120
 LOG_MESSAGE_CONTENT=false            # when true, logs raw message text (debug only)
 ```
@@ -207,7 +209,9 @@ LOG_MESSAGE_CONTENT=false            # when true, logs raw message text (debug o
 - If `AI_PROVIDER != rules` then `AI_API_KEY` required, else fall back to `rules` with a warning.
 - WhatsApp is "configured" only when `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`,
   `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` are all present.
-- If `APP_ACCESS_PASSWORD` set, `AUTH_SECRET` is required.
+- If `APP_ACCESS_PASSWORD` set, `AUTH_SECRET` is required (startup fails otherwise). `APP_ADMIN_EMAIL`
+  defaults to `admin@propertydesk.local` (lower‑cased) when blank. When `APP_ACCESS_PASSWORD` is empty,
+  auth is **disabled** and a warning is emitted (intended for trusted local dev only).
 - If `MEDIA_STORAGE_DRIVER=s3`, `S3_BUCKET` and `S3_REGION` are required.
 
 ---
@@ -319,9 +323,12 @@ Unique `(tenant_id, unit, region)`.
 ## 5. Conventions
 
 - **Base path:** `{API_PREFIX}` (default `/api`). All paths below are relative to it.
-- **Auth:** when `APP_ACCESS_PASSWORD` is set, require a bearer token / session cookie signed
-  with `AUTH_SECRET` on every endpoint **except** the WhatsApp webhook (which authenticates via
-  Meta signature). Tenant is resolved from the authenticated session; default tenant otherwise.
+- **Auth:** when `APP_ACCESS_PASSWORD` is set, require a valid **session cookie** (`pd_session`,
+  signed with `AUTH_SECRET`; see §6.0) on every endpoint **except** the auth endpoints themselves
+  (`/auth/*`) and the WhatsApp webhook (which authenticates via Meta signature). Pages without a
+  valid session redirect to `/login`; API calls without one return `401 unauthorized`. When
+  `APP_ACCESS_PASSWORD` is empty, auth is disabled and all endpoints are open (trusted local dev
+  only). Tenant is resolved from the authenticated session; default tenant otherwise.
 - **Tenant scoping:** every query filters by `tenant_id`. Never return cross‑tenant data.
 - **Success envelope:** `{"success": true, ...payload}`. List endpoints:
   `{"success": true, "items": [...], "total": N, "page": P, "pageSize": S}`.
@@ -342,6 +349,108 @@ Unique `(tenant_id, unit, region)`.
 
 Each endpoint below lists: method, path, request, response, validation/errors, **use cases**,
 and **test cases** (Given → When → Then). Example `curl` uses `BASE=https://app/api`.
+
+### 6.0 Authentication
+
+Property Desk ships with a **single‑admin login** for the dashboard. It is intentionally simple:
+one admin email + one shared password, carried in a signed, stateless cookie. There is no user
+table, no signup, and no password reset in v1. The production backend owns real user accounts
+later; for now the Python API must expose the **same three endpoints** so the existing frontend
+(`/login` page + the dashboard's sign‑out button and session probe) keeps working unchanged.
+
+**How it works (reference: `server/auth/session.ts`)**
+- Login is enabled only when `APP_ACCESS_PASSWORD` is set. If it is empty, auth is disabled: the
+  gate is a no‑op, `/auth/me` reports an anonymous local user, and `/auth/login` returns
+  `503 not_configured`.
+- Credentials: `email` must equal `APP_ADMIN_EMAIL` (case‑insensitive) and `password` must equal
+  `APP_ACCESS_PASSWORD`. **Compare both in constant time** (`hmac.compare_digest`) to avoid timing
+  leaks. Never log the password.
+- Session token = `base64url(payload) + "." + base64url(HMAC_SHA256(AUTH_SECRET, payload))` where
+  `payload = {"email": <lowercased>, "exp": <unix seconds>}`. TTL **7 days**. No secret or password
+  is ever placed in the token. Verification recomputes the HMAC (constant‑time compare) and checks
+  `exp`.
+- The token is delivered as an **HttpOnly cookie** named `pd_session`:
+  `HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`, and `Secure` when `ENV=production`. Logout sets
+  the same cookie with `Max-Age=0`.
+- The route gate (reference: `proxy.ts`) enforces the cookie on every request except `/_next/*`,
+  `/login`, `/api/auth/*`, `/api/whatsapp/webhook`, and `/favicon.ico`.
+
+---
+
+**`POST /auth/login`** — exchange email + password for a session cookie.
+
+Request:
+```json
+{"email": "admin@propertydesk.local", "password": "••••••••"}
+```
+- `email` (required, 1–200 chars), `password` (required, 1–200 chars).
+
+Response (success) — also sets the `pd_session` cookie:
+```json
+{"success": true, "email": "admin@propertydesk.local"}
+```
+
+Errors:
+- `401 unauthorized` — `{"success": false, "error": {"code": "unauthorized", "message": "Incorrect email or password."}}` (wrong email **or** wrong password — do not reveal which).
+- `503 not_configured` — auth is disabled (`APP_ACCESS_PASSWORD` empty).
+- `400 validation_error` — missing/oversized fields.
+
+```bash
+curl -i -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"admin@propertydesk.local","password":"secret"}'
+```
+
+---
+
+**`POST /auth/logout`** — clear the session. Always `200` (idempotent); no body required.
+```json
+{"success": true, "loggedOut": true}
+```
+Sets `pd_session` with `Max-Age=0`.
+
+---
+
+**`GET /auth/me`** — the frontend calls this on load to decide whether to show the sign‑out button
+and to confirm the session is still valid.
+
+- Auth **disabled** (`APP_ACCESS_PASSWORD` empty) → `200`:
+  ```json
+  {"success": true, "authEnabled": false, "user": {"email": "local"}}
+  ```
+- Auth **enabled** + valid cookie → `200`:
+  ```json
+  {"success": true, "authEnabled": true, "user": {"email": "admin@propertydesk.local"}}
+  ```
+- Auth **enabled** + no/invalid/expired cookie → `401`:
+  ```json
+  {"success": false, "authEnabled": true, "user": null}
+  ```
+
+**Use cases**
+- The `/login` page posts to `/auth/login`, then redirects to the `next` query param (default `/`).
+- The dashboard header shows a **Sign out** button only when `authEnabled` is true; it posts to
+  `/auth/logout` then hard‑navigates to `/login`.
+- A logged‑out user hitting any page is redirected to `/login?next=<path>`; any `/api/*` call
+  returns `401` so the SPA can bounce to `/login`.
+
+**Test cases**
+
+| Given | When | Then |
+|---|---|---|
+| auth enabled, no cookie | `GET /auth/me` | `401`, `authEnabled=true`, `user=null` |
+| auth enabled | `POST /auth/login` correct creds | `200`, `Set-Cookie: pd_session=…; HttpOnly; SameSite=Lax`, body `email` echoes the admin |
+| auth enabled | `POST /auth/login` wrong password | `401 unauthorized`, no cookie set |
+| auth enabled | `POST /auth/login` wrong email | `401 unauthorized` (same message as wrong password) |
+| auth enabled, valid cookie | `GET /auth/me` | `200`, `user.email` present |
+| auth enabled, tampered cookie (bad signature) | `GET /auth/me` | `401` |
+| auth enabled, expired `exp` | `GET /auth/me` | `401` |
+| auth enabled | `POST /auth/logout` | `200`, `Set-Cookie: pd_session=; Max-Age=0` |
+| auth **disabled** | `POST /auth/login` | `503 not_configured` |
+| auth **disabled** | `GET /auth/me` | `200`, `authEnabled=false`, `user.email="local"` |
+| auth enabled, no cookie | `GET /` (a page) | `307` redirect to `/login?next=/` |
+| auth enabled, no cookie | `GET /buyers` (API) | `401 unauthorized` |
+
+---
 
 ### 6.1 Health & status
 
@@ -948,6 +1057,7 @@ never depend on a paid AI API or a live WhatsApp account for normal runs.
 - [ ] Photos and videos upload (manual + WhatsApp), stored privately in S3, thumbnailed, linked, served via signed URLs, shown counts in export.
 - [ ] WhatsApp Cloud API webhook: GET verify, POST signature‑checked, idempotent, async; unauthorized senders cannot write into a tenant.
 - [ ] Excel export: one workbook, exactly Buyers/Sellers/Matching; works without GridCraft/AI/WhatsApp running.
+- [ ] Login works: `POST /auth/login` sets a signed HttpOnly `pd_session` cookie, `/auth/me` reports session state, `/auth/logout` clears it; when auth is enabled, pages redirect to `/login` and API calls return `401` without a valid session.
 - [ ] No secrets in frontend/logs; tenant isolation enforced on every query; TLS + encryption at rest.
 - [ ] Core unit/integration tests pass in CI without a paid AI key or live WhatsApp.
 
@@ -956,6 +1066,7 @@ never depend on a paid AI API or a live WhatsApp account for normal runs.
 ### Appendix: endpoint quick list
 
 ```
+POST   /auth/login            POST /auth/logout  GET /auth/me
 GET    /settings/status
 POST   /messages/process
 GET    /buyers                 GET /buyers/{id}   PATCH /buyers/{id}   DELETE /buyers/{id}

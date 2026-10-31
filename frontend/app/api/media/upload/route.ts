@@ -4,6 +4,8 @@ import { storeMediaBuffer } from "@/server/services/media.ts";
 import { ValidationError } from "@/server/lib/errors.ts";
 
 export const runtime = "nodejs";
+// Thumbnailing + uploading to object storage can take a while for large files.
+export const maxDuration = 60;
 
 export const POST = withErrorHandling(async (request: Request) => {
   const { tenantId } = await getTenantContext();

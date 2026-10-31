@@ -7,6 +7,8 @@ import { ListQuerySchema } from "@/server/lib/query-schema.ts";
 import { z } from "zod";
 
 export const runtime = "nodejs";
+// Building the workbook over a large dataset can take a while; raise the timeout.
+export const maxDuration = 60;
 
 const ExportQuerySchema = ListQuerySchema.extend({ scope: z.enum(["all", "filtered"]).default("all") });
 

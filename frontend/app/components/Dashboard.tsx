@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Calendar, ChevronDown, FileDown, RefreshCw, MessageCircle, Home, TriangleAlert, X } from "lucide-react";
+import { Calendar, ChevronDown, FileDown, RefreshCw, MessageCircle, Home, TriangleAlert, X, LogOut } from "lucide-react";
 import { api } from "@/app/lib/api.ts";
 import { ToastProvider, triggerDownload, useToast, ThemeToggle } from "@/app/components/ui.tsx";
 import { SummaryCards } from "@/app/components/SummaryCards.tsx";
@@ -93,7 +93,33 @@ function DashboardInner() {
   const [datePreset, setDatePreset] = useState("all");
   const [dateMenu, setDateMenu] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [auth, setAuth] = useState<{ authEnabled: boolean; email: string | null }>({ authEnabled: false, email: null });
   const toast = useToast();
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        const data = await res.json().catch(() => ({}));
+        setAuth({ authEnabled: Boolean(data?.authEnabled), email: data?.user?.email ?? null });
+      } catch {
+        /* ignore */
+      }
+    };
+    void run();
+  }, []);
+
+  async function signOut() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+    // Hard navigation on purpose: a full reload clears all in-memory records
+    // and cached state after signing out.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = "/login";
+  }
 
   useEffect(() => {
     const apply = () => {
@@ -160,6 +186,11 @@ function DashboardInner() {
             <button onClick={() => triggerDownload(api.exportUrl("all"))} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}>
               <FileDown size={15} aria-hidden="true" /> <span className="hidden sm:inline">Export</span>
             </button>
+            {auth.authEnabled && (
+              <button onClick={signOut} aria-label="Sign out" title={auth.email ? `Sign out (${auth.email})` : "Sign out"} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium" style={{ background: "var(--surface)", borderColor: "var(--border-strong)", color: "var(--muted)" }}>
+                <LogOut size={15} aria-hidden="true" /> <span className="hidden lg:inline">Sign out</span>
+              </button>
+            )}
           </div>
         </header>
 

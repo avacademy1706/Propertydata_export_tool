@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -46,13 +47,14 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
-    "@tailwindcss/turbopack": "^4",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "postcss": "^8.5.32",
     "prisma": "7.10.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",

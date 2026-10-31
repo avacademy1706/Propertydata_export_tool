@@ -4,6 +4,8 @@ import { getTenantContext } from "@/server/db/tenant.ts";
 import { processMessage } from "@/server/services/ingest.ts";
 
 export const runtime = "nodejs";
+// AI extraction can take 10-30s; raise the serverless timeout (Vercel caps Hobby at 60s).
+export const maxDuration = 60;
 
 const BodySchema = z.object({
   text: z.string().min(1, "Message text is required.").max(20000),
