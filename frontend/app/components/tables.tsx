@@ -235,9 +235,10 @@ const sellerColumns: ColumnDef[] = [
 ];
 
 function loadVisible(kind: "buyer" | "seller", columns: ColumnDef[]): string[] {
-  const fallback = columns.filter((c) => c.default).map((c) => c.key);
+  // Default: show every field. Users can still hide columns, and that choice is saved.
+  const fallback = columns.map((c) => c.key);
   try {
-    const raw = localStorage.getItem(`pd:cols:${kind}`);
+    const raw = localStorage.getItem(`pd:cols:v2:${kind}`);
     if (raw) {
       const arr = JSON.parse(raw) as unknown;
       // Keep every saved key (including custom "cf:*" ones that load asynchronously).
@@ -366,7 +367,7 @@ export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since }: {
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [visible, setVisible] = useState<string[]>(() => baseColumns.filter((c) => c.default).map((c) => c.key));
+  const [visible, setVisible] = useState<string[]>(() => baseColumns.map((c) => c.key));
   const [customCols, setCustomCols] = useState<ColumnDef[]>([]);
   const [fieldsReload, setFieldsReload] = useState(0);
   const debounced = useDebounced(search);
@@ -401,23 +402,31 @@ export function RecordsTable({ kind, refreshKey, onOpen, onChanged, since }: {
             },
           }));
         setCustomCols(defs);
+        // Unless the user saved a custom choice, show the admin-defined fields too.
+        try {
+          if (!localStorage.getItem(`pd:cols:v2:${kind}`)) {
+            setVisible([...baseColumns.map((c) => c.key), ...defs.map((d) => d.key)]);
+          }
+        } catch {
+          /* ignore */
+        }
       } catch {
         /* ignore */
       }
     };
     void run();
     return () => { active = false; };
-  }, [kind, fieldsReload]);
+  }, [kind, fieldsReload, baseColumns]);
 
   function persist(next: string[]) {
     setVisible(next);
-    try { localStorage.setItem(`pd:cols:${kind}`, JSON.stringify(next)); } catch { /* ignore */ }
+    try { localStorage.setItem(`pd:cols:v2:${kind}`, JSON.stringify(next)); } catch { /* ignore */ }
   }
   function toggleColumn(key: string) {
     persist(visible.includes(key) ? visible.filter((k) => k !== key) : columns.filter((c) => visible.includes(c.key) || c.key === key).map((c) => c.key));
   }
   function resetColumns() {
-    persist(baseColumns.filter((c) => c.default).map((c) => c.key));
+    persist([...baseColumns, ...customCols].map((c) => c.key));
   }
 
   async function createField(label: string) {
